@@ -24,7 +24,11 @@
         nav button { flex: 1; border: none; background: none; font-size: 12px; color: #666; cursor: pointer; }
         nav button.active-tab { color: var(--primary); font-weight: bold; }
 
-        #reader { width: 100%; border-radius: 12px; overflow: hidden; }
+        #reader { width: 100%; border-radius: 12px; overflow: hidden; margin-bottom: 15px;}
+        
+        /* Loading Spinner */
+        .loader { border: 4px solid #f3f3f3; border-top: 4px solid var(--primary); border-radius: 50%; width: 20px; height: 20px; animation: spin 1s linear infinite; display: inline-block; vertical-align: middle; margin-right: 10px;}
+        @keyframes spin { 0% { transform: rotate(0deg); } 100% { transform: rotate(360deg); } }
     </style>
 </head>
 <body>
@@ -37,21 +41,27 @@
 </div>
 
 <div id="tab-scanner" class="tab-content">
+    <button onclick="startScanner()" style="width:100%; padding:15px; border-radius:10px; background:var(--primary); color:white; border:none; margin-bottom:15px; font-weight:bold;">📷 Kamera starten</button>
     <div id="reader"></div>
-    <div id="scan-result" class="card" style="margin-top:20px; display:none;">
-        <p id="p-name">Suche Produkt...</p>
+    <div id="scan-result" class="card" style="margin-top:20px; display:none; border-left: 4px solid var(--primary);">
+        <p id="p-name" style="margin:0; font-weight:bold;">Suche Produkt...</p>
     </div>
 </div>
 
 <div id="tab-rezepte" class="tab-content">
-    <button onclick="getKIRezept()" style="width:100%; padding:15px; border-radius:10px; background:var(--primary); color:white; border:none;">✨ KI-Rezept vorschlagen</button>
+    <div class="card" style="background:#fff8e1; border: 1px solid #ffe082;">
+        <label for="api-key" style="font-size:12px; font-weight:bold; color:#d84315;">OpenAI API-Key (Nur für diese Session):</label>
+        <input type="password" id="api-key" placeholder="sk-..." style="width:100%; padding:8px; margin-top:5px; border-radius:5px; border:1px solid #ccc;">
+    </div>
+
+    <button onclick="getKIRezept()" style="width:100%; padding:15px; border-radius:10px; background:var(--primary); color:white; border:none; font-weight:bold; font-size:16px; cursor:pointer;">✨ KI-Rezept vorschlagen</button>
     <div id="rezept-ausgabe" style="margin-top:20px;"></div>
 </div>
 
 <div id="tab-smart" class="tab-content">
     <div class="card">
         <h3>🌡️ Innentemperatur</h3>
-        <p id="temp-val" style="font-size: 24px; color: var(--primary);">4.2°C</p>
+        <p id="temp-val" style="font-size: 24px; color: var(--primary); font-weight:bold;">4.2°C</p>
     </div>
     <div class="card">
         <h3>🥤 Getränkefüllstand</h3>
@@ -60,54 +70,149 @@
 </div>
 
 <nav>
-    <button onclick="openTab('inventar', 'Inventar')" class="active-tab">📋<br>Inventar</button>
-    <button onclick="openTab('scanner', 'Scanner')">📷<br>Scanner</button>
-    <button onclick="openTab('rezepte', 'Rezepte')">👨‍🍳<br>Rezepte</button>
-    <button onclick="openTab('smart', 'Smart')">🤖<br>Smart</button>
+    <button onclick="openTab('inventar', 'Inventar', this)" class="active-tab">📋<br>Inventar</button>
+    <button onclick="openTab('scanner', 'Scanner', this)">📷<br>Scanner</button>
+    <button onclick="openTab('rezepte', 'Rezepte', this)">👨‍🍳<br>Rezepte</button>
+    <button onclick="openTab('smart', 'Smart', this)">🤖<br>Smart</button>
 </nav>
 
 <script>
     let inventar = [];
+    let isScanning = false;
+    let html5QrcodeScanner = null;
 
     // Tab-Wechsel Logik
-    function openTab(tabId, title) {
+    function openTab(tabId, title, btnElement) {
         document.querySelectorAll('.tab-content').forEach(t => t.classList.remove('active'));
         document.querySelectorAll('nav button').forEach(b => b.classList.remove('active-tab'));
         document.getElementById('tab-' + tabId).classList.add('active');
         document.getElementById('title').innerText = title;
-        event.currentTarget.classList.add('active-tab');
+        if(btnElement) btnElement.classList.add('active-tab');
     }
 
-    // Scanner Logik
-    function onScanSuccess(decodedText) {
+    // Scanner Logik (Manuel gestartet für Sicherheit)
+    function startScanner() {
+        if(html5QrcodeScanner) return;
+        html5QrcodeScanner = new Html5QrcodeScanner("reader", { fps: 10, qrbox: { width: 250, height: 150 } });
+        html5QrcodeScanner.render(onScanSuccess);
+    }
+
+    async function onScanSuccess(decodedText) {
+        if (isScanning) return;
+        isScanning = true;
+
+        const nameDisplay = document.getElementById('p-name');
         document.getElementById('scan-result').style.display = 'block';
-        fetch(`https://world.openfoodfacts.org/api/v0/product/${decodedText}.json`)
-            .then(res => res.json())
-            .then(data => {
-                if(data.status === 1) {
-                    const name = data.product.product_name;
-                    document.getElementById('p-name').innerText = "Gefunden: " + name;
-                    if(!inventar.includes(name)) {
-                        inventar.push(name);
-                        updateInventar();
-                    }
+        nameDisplay.innerText = "🔍 Suche Produkt in Datenbank...";
+
+        try {
+            const res = await fetch(`https://world.openfoodfacts.org/api/v0/product/${decodedText}.json`);
+            const data = await res.json();
+            
+            if(data.status === 1) {
+                const p = data.product;
+                const produktObj = {
+                    name: p.product_name || "Unbekanntes Produkt",
+                    bild: p.image_front_small_url || "https://via.placeholder.com/50",
+                    kalorien: Math.round(p.nutriments['energy-kcal_100g'] || 0),
+                    protein: Math.round(p.nutriments.proteins_100g || 0),
+                    carbs: Math.round(p.nutriments.carbohydrates_100g || 0)
+                };
+
+                nameDisplay.innerText = "✅ " + produktObj.name + " hinzugefügt!";
+                
+                if(!inventar.some(item => item.name === produktObj.name)) {
+                    inventar.push(produktObj);
+                    updateInventar();
                 }
-            });
+            } else {
+                nameDisplay.innerText = "❌ Produkt ("+decodedText+") nicht gefunden!";
+            }
+        } catch (e) {
+            nameDisplay.innerText = "⚠️ Verbindungsfehler!";
+        }
+        setTimeout(() => { isScanning = false; }, 3000);
     }
 
     function updateInventar() {
         const list = document.getElementById('inventar-liste');
-        if(inventar.length > 0) document.getElementById('liste-leer').style.display = 'none';
-        list.innerHTML = inventar.map(item => `<div class="card">${item}</div>`).join('');
+        const emptyMsg = document.getElementById('liste-leer');
+        
+        if(inventar.length > 0) {
+            emptyMsg.style.display = 'none';
+            list.innerHTML = inventar.map(item => `
+                <div class="card" style="display: flex; align-items: center; gap: 15px;">
+                    <img src="${item.bild}" style="width: 50px; height: 50px; object-fit: contain; border-radius: 5px;">
+                    <div style="flex: 1;">
+                        <b style="display: block;">${item.name}</b>
+                        <small style="color: #666;">
+                            🔥 ${item.kalorien} kcal | 💪 P: ${item.protein}g | 🍞 KH: ${item.carbs}g
+                        </small>
+                    </div>
+                </div>
+            `).join('');
+        }
     }
 
-    let html5QrcodeScanner = new Html5QrcodeScanner("reader", { fps: 10, qrbox: 250 });
-    html5QrcodeScanner.render(onScanSuccess);
-
-    // Platzhalter für KI
-    function getKIRezept() {
+    // Echte OpenAI Integration
+    async function getKIRezept() {
         const ausgabe = document.getElementById('rezept-ausgabe');
-        ausgabe.innerHTML = `<div class="card">KI denkt nach... (Hier binden wir als nächstes die API ein!)</div>`;
+        const apiKey = document.getElementById('api-key').value.trim();
+
+        if (inventar.length === 0) {
+            ausgabe.innerHTML = `<div class="card" style="color:red; font-weight:bold;">❌ Kühlschrank ist leer. Bitte erst Produkte scannen!</div>`;
+            return;
+        }
+
+        if (!apiKey) {
+            ausgabe.innerHTML = `<div class="card" style="color:red; font-weight:bold;">⚠️ Bitte gib oben einen OpenAI API-Key ein!</div>`;
+            return;
+        }
+
+        // Lade-Animation anzeigen
+        ausgabe.innerHTML = `<div class="card"><div class="loader"></div> KI generiert ein Rezept...</div>`;
+
+        // Zutaten aus dem Array als kommagetrennten String aufbauen
+        const zutatenListe = inventar.map(item => item.name).join(', ');
+
+        try {
+            const response = await fetch('https://api.openai.com/v1/chat/completions', {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json',
+                    'Authorization': `Bearer ${apiKey}`
+                },
+                body: JSON.stringify({
+                    model: "gpt-3.5-turbo",
+                    messages: [
+                        {
+                            role: "system", 
+                            content: "Du bist ein kreativer Koch. Der Nutzer nennt dir Zutaten aus seinem Kühlschrank. Erstelle ein kurzes, leckeres Rezept daraus. Antworte in HTML (Nutze <h3> für den Titel, <ul> für Zutaten, <ol> für Schritte)."
+                        },
+                        {
+                            role: "user", 
+                            content: `Ich habe folgende Zutaten im Kühlschrank: ${zutatenListe}. Was kann ich daraus kochen?`
+                        }
+                    ],
+                    max_tokens: 300,
+                    temperature: 0.7
+                })
+            });
+
+            const data = await response.json();
+
+            if (data.error) {
+                ausgabe.innerHTML = `<div class="card" style="color:red;"><b>API Fehler:</b> ${data.error.message}</div>`;
+                return;
+            }
+
+            // Rezept ausgeben
+            const rezeptHtml = data.choices[0].message.content;
+            ausgabe.innerHTML = `<div class="card">${rezeptHtml}</div>`;
+
+        } catch (error) {
+            ausgabe.innerHTML = `<div class="card" style="color:red;">⚠️ Netzwerkfehler. Konnte OpenAI nicht erreichen.</div>`;
+        }
     }
 </script>
 </body>
