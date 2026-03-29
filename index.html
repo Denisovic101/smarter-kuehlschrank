@@ -80,20 +80,26 @@
 
     // Scanner Logik
     function onScanSuccess(decodedText) {
-        document.getElementById('scan-result').style.display = 'block';
-        fetch(`https://world.openfoodfacts.org/api/v0/product/${decodedText}.json`)
-            .then(res => res.json())
-            .then(data => {
-                if(data.status === 1) {
-                    const name = data.product.product_name;
-                    document.getElementById('p-name').innerText = "Gefunden: " + name;
-                    if(!inventar.includes(name)) {
-                        inventar.push(name);
-                        updateInventar();
-                    }
+    // 1. Gib dir selbst eine Nachricht, was gescannt wurde
+    alert("Code erkannt: " + decodedText); 
+
+    fetch(`https://world.openfoodfacts.org/api/v0/product/${decodedText}.json`)
+        .then(res => res.json())
+        .then(data => {
+            if(data.status === 1) {
+                const name = data.product.product_name;
+                alert("Produkt gefunden: " + name); // 2. Zweite Nachricht
+                
+                if(!inventar.includes(name)) {
+                    inventar.push(name);
+                    updateInventar();
                 }
-            });
-    }
+            } else {
+                alert("Produkt nicht in Datenbank gefunden!");
+            }
+        })
+        .catch(err => alert("Fehler bei der Internetverbindung: " + err));
+}
 
     function updateInventar() {
         const list = document.getElementById('inventar-liste');
