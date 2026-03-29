@@ -14,11 +14,14 @@
         }
         header { background: white; padding: 15px; text-align: center; box-shadow: 0 2px 5px rgba(0,0,0,0.1); position: sticky; top: 0; z-index: 1000; }
         header h2 { margin: 0; font-size: 1.2rem; }
+        
         .tab-content { display: none; padding: 15px; animation: fadeIn 0.3s ease; }
         .active { display: block; }
         @keyframes fadeIn { from { opacity: 0; } to { opacity: 1; } }
+        
         .card { background: white; padding: 15px; border-radius: 12px; margin-bottom: 12px; box-shadow: 0 2px 8px rgba(0,0,0,0.06); }
-        #reader { width: 100% !important; border: none !important; border-radius: 12px; overflow: hidden; }
+        
+        #reader { width: 100% !important; border: none !important; border-radius: 12px; overflow: hidden; margin-top: 10px; }
         #reader__dashboard_section_swaplink { display: none; }
         
         nav { 
@@ -37,9 +40,10 @@
         nav button.active-tab { color: var(--primary); font-weight: bold; }
         
         .btn-action { width: 100%; padding: 15px; border-radius: 12px; background: var(--primary); color: white; border: none; font-weight: bold; font-size: 1rem; cursor: pointer; }
+        
         .item-header { display: flex; justify-content: space-between; align-items: center; font-weight: bold; margin-bottom: 8px;}
         .qty-controls { display: flex; align-items: center; gap: 10px; }
-        .qty-btn { background: #eee; border: none; width: 28px; height: 28px; border-radius: 50%; font-weight: bold; cursor: pointer;}
+        .qty-btn { background: #eee; border: none; width: 28px; height: 28px; border-radius: 50%; font-weight: bold; cursor: pointer; color: black;}
         .macros { display: flex; gap: 8px; font-size: 0.8rem; color: #555; flex-wrap: wrap;}
         .macro-badge { background: #e0f0ff; padding: 3px 8px; border-radius: 8px; color: var(--primary);}
     </style>
@@ -54,8 +58,9 @@
 </div>
 
 <div id="tab-scanner" class="tab-content">
-    <div class="card" id="scanner-container">
-        <p style="text-align:center; color:#666; margin-top:0;">Kamera auf einen Barcode richten</p>
+    <div class="card" id="scanner-container" style="text-align: center;">
+        <p style="color:#666; margin-top:0;">Erlaube den Kamerazugriff, um Barcodes zu scannen.</p>
+        <button class="btn-action" onclick="startScanner()" id="start-scan-btn">📷 Kamera starten</button>
         <div id="reader"></div>
     </div>
     <div id="scan-result" class="card" style="display:none; border-left: 5px solid var(--primary);">
@@ -95,6 +100,7 @@
     let isScanning = false;
     let html5QrcodeScanner = null;
 
+    // FEHLERTOLERANTE TAB-LOGIK
     function openTab(tabId, title, btnElement) {
         try {
             document.querySelectorAll('.tab-content').forEach(content => content.classList.remove('active'));
@@ -103,17 +109,8 @@
             document.getElementById('tab-' + tabId).classList.add('active');
             document.getElementById('title').innerText = title;
             btnElement.classList.add('active-tab');
-
-            if (tabId === 'scanner' && !html5QrcodeScanner) {
-                if (typeof Html5QrcodeScanner !== 'undefined') {
-                    startScanner();
-                } else {
-                    console.warn("Scanner nicht geladen.");
-                    document.getElementById('reader').innerHTML = "<p style='color:red;'>Scanner konnte nicht geladen werden.</p>";
-                }
-            }
         } catch (error) {
-            console.error("Fehler beim Tab-Wechsel:", error);
+            console.error("Tab-Fehler abgefangen:", error);
         }
     }
 
@@ -156,20 +153,37 @@
         }
     }
 
+    // MANUELLER SCANNER-START (VERHINDERT ABSTÜRZE!)
     function startScanner() {
-        html5QrcodeScanner = new Html5QrcodeScanner("reader", { 
-            fps: 10, qrbox: { width: 250, height: 150 }, rememberLastUsedCamera: true
-        });
-        html5QrcodeScanner.render(onScanSuccess);
+        try {
+            if (html5QrcodeScanner) return; // Verhindert doppelten Start
+            
+            document.getElementById('start-scan-btn').style.display = 'none'; // Button verstecken
+            
+            html5QrcodeScanner = new Html5QrcodeScanner("reader", { 
+                fps: 10, qrbox: { width: 250, height: 150 }, rememberLastUsedCamera: true
+            });
+            html5QrcodeScanner.render(onScanSuccess, onScanFailure);
+        } catch (error) {
+            console.error("Scanner konnte nicht gestartet werden:", error);
+            alert("Kamerafehler. Bitte Berechtigungen prüfen.");
+            document.getElementById('start-scan-btn').style.display = 'block';
+        }
+    }
+
+    function onScanFailure(error) {
+        // Ignoriere die Standard-Warnungen der Bibliothek, wenn kein Barcode im Bild ist
     }
 
     async function onScanSuccess(decodedText) {
         if (isScanning) return;
         isScanning = true;
+        
         const resultDiv = document.getElementById('scan-result');
         const nameDisplay = document.getElementById('p-name');
+        
         resultDiv.style.display = 'block';
-        nameDisplay.innerText = "🔍 Suche Produktdatenbank...";
+        nameDisplay.innerText = "🔍 Suche in der Datenbank...";
 
         let existingItem = inventar.find(i => i.id === decodedText);
         if (existingItem) {
@@ -180,6 +194,7 @@
             try {
                 const response = await fetch(`https://world.openfoodfacts.org/api/v0/product/${decodedText}.json`);
                 const data = await response.json();
+                
                 if (data.status === 1) {
                     const nutriments = data.product.nutriments || {};
                     const newItem = {
@@ -198,12 +213,15 @@
                     nameDisplay.innerText = "❌ Unbekannter Barcode (" + decodedText + ")";
                 }
             } catch (error) {
-                nameDisplay.innerText = "⚠️ Verbindungsfehler!";
+                nameDisplay.innerText = "⚠️ Verbindungsfehler zur Datenbank!";
             }
         }
+        
+        // 3 Sekunden Blockade nach Scan, damit nicht 10x das gleiche gescannt wird
         setTimeout(() => { isScanning = false; }, 3000);
     }
 
+    // KI REZEPTE
     function getKIRezept() {
         const ausgabe = document.getElementById('rezept-ausgabe');
         if (inventar.length === 0) {
@@ -221,19 +239,20 @@
             ausgabe.innerHTML = `
                 <div class="card" style="border: 2px solid var(--primary);">
                     <h3 style="margin-top:0;">🍽️ Kreative Kühlschrank-Pfanne</h3>
-                    <p><b>Benötigte Zutaten aus deinem Inventar:</b> ${zutatenNamen}</p>
+                    <p><b>Benötigte Zutaten:</b> ${zutatenNamen}</p>
                     <p><b>Anleitung:</b></p>
                     <ol style="padding-left: 20px;">
                         <li>Alle Zutaten in mundgerechte Stücke schneiden.</li>
                         <li>Etwas Öl in einer Pfanne erhitzen.</li>
-                        <li>Die Zutaten nach und nach anbraten, bis sie goldbraun sind.</li>
-                        <li>Mit Salz, Pfeffer und Kräutern nach Belieben abschmecken.</li>
+                        <li>Die Zutaten nach und nach anbraten.</li>
+                        <li>Mit Salz und Pfeffer abschmecken.</li>
                     </ol>
                 </div>
             `;
         }, 1500);
     }
 
+    // SMART TAB LIVE SENSORIK
     setInterval(() => {
         let tempElement = document.getElementById('live-temp');
         let statusElement = document.getElementById('temp-status');
