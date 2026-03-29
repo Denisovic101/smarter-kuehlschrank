@@ -2,52 +2,113 @@
 <html lang="de">
 <head>
     <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
     <title>Smarter Kühlschrank</title>
     <script src="https://unpkg.com/html5-qrcode"></script>
     <style>
-        body { font-family: sans-serif; text-align: center; padding: 20px; }
-        #reader { width: 100%; max-width: 500px; margin: auto; }
-        #product-info { margin-top: 20px; padding: 15px; border: 1px solid #ddd; display: none; }
+        :root { --primary: #0070f3; --bg: #f0f2f5; }
+        body { font-family: -apple-system, sans-serif; margin: 0; background: var(--bg); padding-bottom: 70px; }
+        
+        /* Header */
+        header { background: white; padding: 15px; text-align: center; box-shadow: 0 2px 5px rgba(0,0,0,0.1); }
+        
+        /* Tab-Inhalte */
+        .tab-content { display: none; padding: 20px; }
+        .active { display: block; }
+
+        /* Karten-Design für Produkte & Rezepte */
+        .card { background: white; padding: 15px; border-radius: 12px; margin-bottom: 10px; box-shadow: 0 2px 4px rgba(0,0,0,0.05); }
+        
+        /* Navigation unten (iPhone Style) */
+        nav { position: fixed; bottom: 0; width: 100%; background: white; display: flex; border-top: 1px solid #ddd; height: 60px; }
+        nav button { flex: 1; border: none; background: none; font-size: 12px; color: #666; cursor: pointer; }
+        nav button.active-tab { color: var(--primary); font-weight: bold; }
+
+        #reader { width: 100%; border-radius: 12px; overflow: hidden; }
     </style>
 </head>
 <body>
-    <h1>🍎 Mein Smarter Kühlschrank</h1>
+
+<header><h2 id="title">Inventar</h2></header>
+
+<div id="tab-inventar" class="tab-content active">
+    <div id="liste-leer">Dein Kühlschrank ist leer. Scan etwas!</div>
+    <div id="inventar-liste"></div>
+</div>
+
+<div id="tab-scanner" class="tab-content">
     <div id="reader"></div>
-    
-    <div id="product-info">
-        <h2 id="p-name">Produktname</h2>
-        <p id="p-brand">Marke</p>
-        <img id="p-img" src="" style="width: 100px;">
+    <div id="scan-result" class="card" style="margin-top:20px; display:none;">
+        <p id="p-name">Suche Produkt...</p>
     </div>
+</div>
 
-    <script>
-        // Diese Funktion wird aufgerufen, wenn ein Barcode erkannt wurde
-        async function onScanSuccess(decodedText) {
-            console.log("Code erkannt: " + decodedText);
-            
-            // Abfrage der kostenlosen Open Food Facts Datenbank
-            const url = `https://world.openfoodfacts.org/api/v0/product/${decodedText}.json`;
-            
-            try {
-                const response = await fetch(url);
-                const data = await response.json();
+<div id="tab-rezepte" class="tab-content">
+    <button onclick="getKIRezept()" style="width:100%; padding:15px; border-radius:10px; background:var(--primary); color:white; border:none;">✨ KI-Rezept vorschlagen</button>
+    <div id="rezept-ausgabe" style="margin-top:20px;"></div>
+</div>
 
-                if (data.status === 1) {
-                    // Produkt gefunden! Infos anzeigen
-                    document.getElementById('product-info').style.display = 'block';
-                    document.getElementById('p-name').innerText = data.product.product_name || "Unbekanntes Produkt";
-                    document.getElementById('p-brand').innerText = data.product.brands || "";
-                    document.getElementById('p-img').src = data.product.image_front_url || "";
-                } else {
-                    alert("Produkt nicht in der Datenbank gefunden.");
+<div id="tab-smart" class="tab-content">
+    <div class="card">
+        <h3>🌡️ Innentemperatur</h3>
+        <p id="temp-val" style="font-size: 24px; color: var(--primary);">4.2°C</p>
+    </div>
+    <div class="card">
+        <h3>🥤 Getränkefüllstand</h3>
+        <p>Cola: 80%</p>
+    </div>
+</div>
+
+<nav>
+    <button onclick="openTab('inventar', 'Inventar')" class="active-tab">📋<br>Inventar</button>
+    <button onclick="openTab('scanner', 'Scanner')">📷<br>Scanner</button>
+    <button onclick="openTab('rezepte', 'Rezepte')">👨‍🍳<br>Rezepte</button>
+    <button onclick="openTab('smart', 'Smart')">🤖<br>Smart</button>
+</nav>
+
+<script>
+    let inventar = [];
+
+    // Tab-Wechsel Logik
+    function openTab(tabId, title) {
+        document.querySelectorAll('.tab-content').forEach(t => t.classList.remove('active'));
+        document.querySelectorAll('nav button').forEach(b => b.classList.remove('active-tab'));
+        document.getElementById('tab-' + tabId).classList.add('active');
+        document.getElementById('title').innerText = title;
+        event.currentTarget.classList.add('active-tab');
+    }
+
+    // Scanner Logik
+    function onScanSuccess(decodedText) {
+        document.getElementById('scan-result').style.display = 'block';
+        fetch(`https://world.openfoodfacts.org/api/v0/product/${decodedText}.json`)
+            .then(res => res.json())
+            .then(data => {
+                if(data.status === 1) {
+                    const name = data.product.product_name;
+                    document.getElementById('p-name').innerText = "Gefunden: " + name;
+                    if(!inventar.includes(name)) {
+                        inventar.push(name);
+                        updateInventar();
+                    }
                 }
-            } catch (error) {
-                console.error("Fehler bei der API-Abfrage", error);
-            }
-        }
+            });
+    }
 
-        let html5QrcodeScanner = new Html5QrcodeScanner("reader", { fps: 10, qrbox: 250 });
-        html5QrcodeScanner.render(onScanSuccess);
-    </script>
+    function updateInventar() {
+        const list = document.getElementById('inventar-liste');
+        if(inventar.length > 0) document.getElementById('liste-leer').style.display = 'none';
+        list.innerHTML = inventar.map(item => `<div class="card">${item}</div>`).join('');
+    }
+
+    let html5QrcodeScanner = new Html5QrcodeScanner("reader", { fps: 10, qrbox: 250 });
+    html5QrcodeScanner.render(onScanSuccess);
+
+    // Platzhalter für KI
+    function getKIRezept() {
+        const ausgabe = document.getElementById('rezept-ausgabe');
+        ausgabe.innerHTML = `<div class="card">KI denkt nach... (Hier binden wir als nächstes die API ein!)</div>`;
+    }
+</script>
 </body>
 </html>
